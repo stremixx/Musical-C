@@ -9,7 +9,9 @@
 #include <filesystem>
 #include <iostream>
 #include <mutex>
+#include <sstream>
 #include <string>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <thread>
 #include <unistd.h>
@@ -176,6 +178,13 @@ int kbhit() {
   FD_ZERO(&fds);
   FD_SET(STDIN_FILENO, &fds);
   return select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+}
+
+void getTermSize(int &rows, int &cols) {
+  struct winsize w;
+  ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
+  rows = w.ws_row;
+  cols = w.ws_col;
 }
 
 // --- Music Player ---
@@ -399,8 +408,9 @@ std::string drawVolumeBar(float volume, int width) {
   return bar;
 }
 
-void drawVisualizer(const std::vector<float> &bars, int height) {
-  std::cout << "\r\n";
+void drawVisualizer(std::ostream &out, const std::vector<float> &bars,
+                    int height) {
+  out << "\r\n";
 
   // We have 32 bars.
   // Display them. We can probably fit them all or do every other one if width
@@ -408,24 +418,24 @@ void drawVisualizer(const std::vector<float> &bars, int height) {
   // wide. Should fit.
 
   for (int h = height; h > 0; --h) {
-    std::cout << "  "; // Margin
+    out << "  "; // Margin
     for (float val : bars) {
       // Normalized height approx.
       int barHeight = static_cast<int>(std::min(val * height, (float)height));
 
       if (h <= barHeight) {
-        std::cout << COLOR_GREEN << "\u2588 " << COLOR_RESET;
+        out << COLOR_GREEN << "\u2588 " << COLOR_RESET;
       } else {
-        std::cout << "  ";
+        out << "  ";
       }
     }
-    std::cout << "\r\n";
+    out << "\r\n";
   }
   // Bottom line
-  std::cout << "  ";
+  out << "  ";
   for (int i = 0; i < NUM_BARS; ++i)
-    std::cout << "--";
-  std::cout << "\r\n\r\n";
+    out << "--";
+  out << "\r\n\r\n";
 }
 
 std::vector<std::string> getAudioFiles(const std::string &path) {
@@ -499,51 +509,79 @@ int main() {
 
     // Render UI
     if (dirty) {
-      std::cout << "\033[2J\033[H";
+      int rows, cols;
+      getTermSize(rows, cols);
 
-      std::cout << COLOR_BOLD << COLOR_MAGENTA
-                << "=== Terminal Music Player ===" << COLOR_RESET << "\r\n";
+      // Calculate available height for visualizer
+      // Header: 2 lines
+      // Playing/Status/Vol/Prog: 4 lines
+      // Playlist Header + Separation: 2 lines
+      // Playlist items: 7 lines
+      // Controls: 2 lines
+      // Bottom margin: 1 line
+      // Total fixed usage approx: 18 lines.
+      // Let's dynamically size the playlist if we want, but task is mainly
+      // about "program screen" (visualizer + width). Let's prioritize
+      // Visualizer height.
+
+      int reservedHeight = 18;
+      int visHeight = std::max(5, rows - reservedHeight);
+
+      // Widths
+      int totalWidth = std::max(40, cols - 4);      // Margin
+      int barWidth = std::max(10, totalWidth - 25); // Room for timestamps
+
+      std::stringstream buffer;
+      buffer << "\033[H"; // Move cursor to home
+
+      buffer << COLOR_BOLD << COLOR_MAGENTA
+             << "=== Terminal Music Player ===" << COLOR_RESET << "\r\n";
 
       // Visualizer Area
       std::vector<float> bars;
       player.getVisData(bars);
-      drawVisualizer(bars, 10);
+      drawVisualizer(buffer, bars, visHeight);
 
-      std::cout << "-----------------------------" << "\r\n";
-      std::cout << "Now Playing: " << COLOR_CYAN << player.getCurrentTitle()
-                << COLOR_RESET << "\r\n";
-      std::cout << "Status: "
-                << (player.isPlaying()
-                        ? (std::string(COLOR_GREEN) + "[PLAYING]" + COLOR_RESET)
-                        : (std::string(COLOR_YELLOW) + "[PAUSED]" +
-                           COLOR_RESET))
-                << "\r\n";
-      std::cout << "Volume: " << drawVolumeBar(player.getVolume(), 20)
-                << "\r\n";
-      std::cout << "Progress: "
-                << drawProgressBar(player.getCursor(), player.getLength(), 30)
-                << "\r\n";
+      buffer << "-----------------------------" << "\r\n";
+      buffer << "Now Playing: " << COLOR_CYAN << player.getCurrentTitle()
+             << COLOR_RESET << "\r\n";
+      buffer << "Status: "
+             << (player.isPlaying()
+                     ? (std::string(COLOR_GREEN) + "[PLAYING]" + COLOR_RESET)
+                     : (std::string(COLOR_YELLOW) + "[PAUSED]" + COLOR_RESET))
+             << "\r\n";
+      buffer << "Volume: "
+             << drawVolumeBar(player.getVolume(), std::min(20, totalWidth / 2))
+             << "\r\n";
+      buffer << "Progress: "
+             << drawProgressBar(player.getCursor(), player.getLength(),
+                                barWidth)
+             << "\r\n";
 
-      std::cout << "\r\n";
+      buffer << "\r\n";
       // Truncate playlist to show fewer items to save space
       int start = std::max(0, currentIndex - 3);
       int end = std::min((int)files.size(), start + 7);
 
-      std::cout << "Playlist:\r\n";
+      buffer << "Playlist:\r\n";
       for (int i = start; i < end; ++i) {
         if (i == currentIndex) {
-          std::cout << COLOR_BOLD << COLOR_GREEN << " > " << files[i]
-                    << COLOR_RESET << "\r\n";
+          buffer << COLOR_BOLD << COLOR_GREEN << " > " << files[i]
+                 << COLOR_RESET << "\r\n";
         } else {
-          std::cout << "   " << files[i] << "\r\n";
+          buffer << "   " << files[i] << "\r\n";
         }
       }
 
-      std::cout << "\r\n";
-      std::cout << "Controls: [Space] Pause | [n] Next | [p] Prev | [+/-] Vol "
-                   "| [f/b] Seek | [q] Quit"
-                << "\r\n";
+      buffer << "\r\n";
+      buffer << "Controls: [Space] Pause | [n] Next | [p] Prev | [+/-] Vol "
+                "| [f/b] Seek | [q] Quit"
+             << "\r\n";
 
+      // Clear from cursor to end of screen
+      buffer << "\033[J";
+
+      std::cout << buffer.str();
       std::cout.flush();
       dirty = false;
     }

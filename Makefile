@@ -16,7 +16,7 @@ ifeq ($(UNAME_S),Darwin)
 endif
 
 TARGET = music_player
-SRC = main.cpp
+SRC = main.cpp FftUtils.cpp TerminalUtils.cpp VisualizerNode.cpp TUI.cpp MusicPlayer.cpp
 
 $(TARGET): $(SRC)
 	$(CXX) $(CXXFLAGS) $(SRC) -o $(TARGET) $(LDFLAGS)

@@ -1,0 +1,9 @@
+music_player
+*.o
+.DS_Store
+yt-dlp
+bin/
+*.mp3
+*.wav
+*.flac
+*.ogg

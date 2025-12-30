@@ -59,7 +59,7 @@ std::string drawVolumeBar(float volume, int width) {
 
 void drawVisualizer(std::ostream &out, const std::vector<float> &bars,
                     int height) {
-  out << "\r\n";
+  // out << "\r\n"; // Removed spacer
 
   for (int h = height; h > 0; --h) {
     out << "  "; // Margin

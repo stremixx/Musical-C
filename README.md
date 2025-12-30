@@ -1,4 +1,4 @@
-# Musical-cpp 🎵
+# Musical-C 🎵
 
 > **Your terminal, now with rhythm.**
 
